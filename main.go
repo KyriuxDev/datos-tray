@@ -21,6 +21,7 @@ import (
 	"fyne.io/systray"
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/yusufpapurcu/wmi"
+	"golang.org/x/sys/windows/registry"
 )
 
 //go:embed icon.ico
@@ -99,6 +100,25 @@ func regQueryString(key syscall.Handle, name string) (string, error) {
 		return "", err
 	}
 	return syscall.UTF16ToString(buf), nil
+}
+
+// ── Autoarranque ─────────────────────────────────────
+func configurarAutoarranque() {
+    exe, err := os.Executable()
+    if err != nil {
+        return
+    }
+
+    k, err := registry.OpenKey(
+        registry.CURRENT_USER,
+        `Software\Microsoft\Windows\CurrentVersion\Run`,
+        registry.SET_VALUE,
+    )
+    if err != nil {
+        return
+    }
+    defer k.Close()
+    k.SetStringValue("IMSS_TrayApp", exe)
 }
 
 // ── hardware ──────────────────────────────────────────────────────────
@@ -273,5 +293,8 @@ func onReady() {
 func onExit() { os.Exit(0) }
 
 func main() {
-	systray.Run(onReady, onExit)
+    if runtime.GOOS == "windows" {
+        configurarAutoarranque()
+    }
+    systray.Run(onReady, onExit)
 }

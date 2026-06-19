@@ -17,12 +17,73 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
-
+	"time" 
 	"fyne.io/systray"
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/yusufpapurcu/wmi"
 	"golang.org/x/sys/windows/registry"
 )
+
+// ── Hotkeys globales ──────────────────────────────────────────────────
+var registerHotKey = user32.NewProc("RegisterHotKey")
+var getMessage     = user32.NewProc("GetMessageW")
+
+const (
+    MOD_CONTROL = 0x0002
+    MOD_ALT     = 0x0001
+    HOTKEY_DATOS = 1
+    HOTKEY_QR    = 2
+)
+
+func escucharHotkeys(info HardwareInfo) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	var peekMessage    = user32.NewProc("PeekMessageW")
+	var translateMessage = user32.NewProc("TranslateMessage")
+	var dispatchMessage  = user32.NewProc("DispatchMessageW")
+
+	registerHotKey.Call(0, HOTKEY_DATOS, MOD_CONTROL|MOD_ALT, uintptr('I'))
+	registerHotKey.Call(0, HOTKEY_QR,    MOD_CONTROL|MOD_ALT, uintptr('Q'))
+
+	type MSG struct {
+		Hwnd    uintptr
+		Message uint32
+		WParam  uintptr
+		LParam  uintptr
+		Time    uint32
+		Pt      [2]int32
+	}
+
+	for {
+		var msg MSG
+		ret, _, _ := peekMessage.Call(
+			uintptr(unsafe.Pointer(&msg)),
+			0, 0, 0, 1,
+		)
+		if ret != 0 {
+			if msg.Message == 0x0312 {
+				switch msg.WParam {
+				case HOTKEY_DATOS:
+					go notificar("IMSS Oaxaca — Datos del Equipo", formatoDatos(info))
+				case HOTKEY_QR:
+					go func() {
+						ruta, err := generarQR(info)
+						if err != nil {
+							notificar("Error", "No se pudo generar el QR")
+						} else {
+							abrirImagen(ruta)
+						}
+					}()
+				}
+			}
+			translateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+			dispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
 
 //go:embed icon.ico
 var iconData []byte
@@ -265,6 +326,8 @@ func onReady() {
 	systray.SetIcon(iconData)
 
 	info := getHardwareInfo()
+
+	go escucharHotkeys(info)
 
 	mDatos := systray.AddMenuItem("Ver Datos del Equipo", "")
 	mQR    := systray.AddMenuItem("Generar Codigo QR", "")
